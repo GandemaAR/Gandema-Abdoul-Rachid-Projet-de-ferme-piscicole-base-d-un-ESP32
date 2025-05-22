@@ -1,19 +1,20 @@
 #include <Arduino.h>
+#include <WiFi.h>
 
-#define ledPin 2
+const char* ssid = "ESP32-AP";
+const char* password = "123456789";
+IPAddress local_ip  (192,168,4,1);
+IPAddress getway    (192,168,4,1);
+IPAddress subnet    (255,255,255,0);
 
 void setup() {
 Serial.begin(115200);
 Serial.println("Starting...");
-pinMode(ledPin, OUTPUT);
-digitalWrite(ledPin, LOW);
+WiFi.softAP(ssid,password);
+WiFi.softAPConfig(local_ip,getway,subnet);
 }
 
 void loop() {
-digitalWrite(ledPin, HIGH);
-delay(500);
-digitalWrite(ledPin, LOW);
-delay(500);  
-Serial.println("Blinking LED");
+
 }
 
