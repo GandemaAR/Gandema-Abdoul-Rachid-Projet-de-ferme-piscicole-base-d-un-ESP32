@@ -24,22 +24,49 @@ WebServer server(80);
 const char* style = "<style>"
                     "body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f4; padding: 20px; }"
                     "h1 { color: #333; }"
-                    ".button { padding: 12px 24px; margin: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }"
+                    ".button { padding: 12px 24px; margin: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; cursor: pointer; }"
                     ".button:hover { background-color: #0056b3; }"
+                    "#status { font-size: 18px; color: #444; }"
                     "</style>";
+
 String getHtml() {
   String html = "<!DOCTYPE html><html><head>"
                 "<meta charset=\"UTF-8\">"
                 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
                 "<title>ESP32 Web Server</title>"
                 + String(style) +
+                "<script>"
+                // Script AJAX pour mises à jour en temps réel
+                "function updateStatus() {"
+                "  var xhr = new XMLHttpRequest();"
+                "  xhr.open('GET', '/sensor', true);"
+                "  xhr.onreadystatechange = function() {"
+                "    if (xhr.readyState == 4 && xhr.status == 200) {"
+                "      var data = JSON.parse(xhr.responseText);"
+                "      document.getElementById('status').innerHTML = "
+                "        'LED : ' + data.led + '<br>' + "
+                "        'Température : ' + data.temperature + ' °C<br>' + "
+                "        'Humidité : ' + data.humidity + ' %';"
+                "    }"
+                "  };"
+                "  xhr.send();"
+                "}"
+                "function sendCommand(cmd) {"
+                "  var xhr = new XMLHttpRequest();"
+                "  xhr.open('GET', '/led/' + cmd, true);"
+                "  xhr.onreadystatechange = function() {"
+                "    if (xhr.readyState == 4 && xhr.status == 200) { updateStatus(); }"
+                "  };"
+                "  xhr.send();"
+                "}"
+                "setInterval(updateStatus, 5000);" // Mise à jour toutes les 5 secondes
+                "window.onload = updateStatus;"
+                "</script>"
                 "</head><body>"
                 "<h1>Contrôle de la LED</h1>"
-                "<p>État de la LED : " + String(digitalRead(ledPin) ? "ALLUMÉE" : "ÉTEINTE") + "</p>"
-                "<p><a href=\"/led/on\" class=\"button\">Allumer</a></p>"
-                "<p><a href=\"/led/off\" class=\"button\">Éteindre</a></p>"
-                "<h2>Données du capteur</h2>" // Nouveau lien
-                "<p><a href=\"/sensor\" class=\"button\">Voir température et humidité</a></p>"
+                "<p id=\"status\">Chargement...</p>"
+                "<p><a href=\"javascript:sendCommand('on')\" class=\"button\">Allumer</a></p>"
+                "<p><a href=\"javascript:sendCommand('off')\" class=\"button\">Éteindre</a></p>"
                 "</body></html>";
   return html;
 }
@@ -92,21 +119,17 @@ void eteindreled(){
 }
 
 void capteur() {
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
-  String response = "<!DOCTYPE html><html><head>"
-                   "<meta charset=\"UTF-8\">"
-                   "<title>Données du capteur</title>"
-                   + String(style) +
-                   "</head><body>"
-                   "<h1>Données du capteur DHT11</h1>";
-  if (isnan(temperature) || isnan(humidity)) {
-    response += "<p>Erreur de lecture du capteur !</p>";
-  } else {
-    response += "<p>Température : " + String(temperature) + " °C</p>";
-    response += "<p>Humidité : " + String(humidity) + " %</p>";
-  }
-  response += "<p><a href=\"/\" class=\"button\">Retour</a></p>"
-             "</body></html>";
-  server.send(200, "text/html", response);
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+    String json = "{";
+    json += "\"led\": \"" + String(digitalRead(ledPin) ? "ALLUMÉE" : "ÉTEINTE") + "\",";
+    if (isnan(temperature) || isnan(humidity)) {
+        json += "\"temperature\": \"Erreur\",";
+        json += "\"humidity\": \"Erreur\"";
+    } else {
+        json += "\"temperature\": " + String(temperature) + ",";
+        json += "\"humidity\": " + String(humidity);
+    }
+    json += "}";
+    server.send(200, "application/json", json);
 }
