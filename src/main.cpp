@@ -1,8 +1,8 @@
-#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
 #include <DHT.h>
-#include <ESPAsyncWebServer.h>
+#include <FS.h>
 #include <SPIFFS.h>
-
 
 const char* ssid = "ESP32-AP";
 const char* password = "12345678";
@@ -13,100 +13,102 @@ const int ledPin = 2;
 #define DHTPIN 4
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
-AsyncWebServer server(80);
+WebServer server(80);
 
-void setup()
-{
-  //----------------------------------------------------Serial
+void handleRoot() {
+  File file = SPIFFS.open("/index.html", "r");
+  if (!file) {
+    server.send(404, "text/plain", "Fichier index.html non trouvé");
+    return;
+  }
+  server.streamFile(file, "text/html");
+  file.close();
+}
+
+void handleCss() {
+  File file = SPIFFS.open("/style.css", "r");
+  if (!file) {
+    server.send(404, "text/plain", "Fichier style.css non trouvé");
+    return;
+  }
+  server.streamFile(file, "text/css");
+  file.close();
+}
+
+void handleJs() {
+  File file = SPIFFS.open("/script.js", "r");
+  if (!file) {
+    server.send(404, "text/plain", "Fichier script.js non trouvé");
+    return;
+  }
+  server.streamFile(file, "application/javascript");
+  file.close();
+}
+
+void handleLedOn() {
+  digitalWrite(ledPin, HIGH);
+  server.send(200, "text/plain", "OK");
+}
+
+void handleLedOff() {
+  digitalWrite(ledPin, LOW);
+  server.send(200, "text/plain", "OK");
+}
+
+void handleApiStatus() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  String json = "{";
+  json += "\"led\": \"" + String(digitalRead(ledPin) ? "ALLUMÉE" : "ÉTEINTE") + "\",";
+  if (isnan(temperature) || isnan(humidity)) {
+    json += "\"temperature\": \"Erreur\",";
+    json += "\"humidity\": \"Erreur\"";
+  } else {
+    json += "\"temperature\": " + String(temperature) + ",";
+    json += "\"humidity\": " + String(humidity);
+  }
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+void handleNotFound() {
+  server.send(404, "text/plain", "Page non trouvée");
+}
+
+void setup() {
   Serial.begin(115200);
-  Serial.println("\n");
-
-  //----------------------------------------------------GPIO
   pinMode(ledPin, OUTPUT);
   digitalWrite(ledPin, LOW);
+  dht.begin();
 
-  //----------------------------------------------------SPIFFS
-  if(!SPIFFS.begin())
-  {
-    Serial.println("Erreur SPIFFS...");
+  // Initialiser SPIFFS
+  if (!SPIFFS.begin(true)) {
+    Serial.println("Échec de l'initialisation de SPIFFS");
     return;
   }
 
-  File root = SPIFFS.open("/");
-  File file = root.openNextFile();
-
-  while(file)
-  {
-    Serial.print("File: ");
-    Serial.println(file.name());
-    file.close();
-    file = root.openNextFile();
+  if (!WiFi.softAPConfig(local_IP, gateway, subnet)) {
+    Serial.println("Échec de la configuration AP");
   }
-
-  //----------------------------------------------------WIFI
-  WiFi.softAPConfig(local_IP, gateway, subnet);
-  Serial.println("Configuration du point d'accès WiFi...");
   WiFi.softAP(ssid, password);
-	
-	
+  Serial.println("Point d'accès démarré");
+  Serial.print("Adresse IP : ");
+  Serial.println(WiFi.softAPIP());
 
-	
-	Serial.println("\n");
-	Serial.println("Connexion etablie!");
-	Serial.print("Adresse IP: ");
-	Serial.println(WiFi.localIP());
-
-  //----------------------------------------------------SERVER
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    request->send(SPIFFS, "/index.html", "text/html");
-  });
-
-  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    request->send(SPIFFS, "/style.css", "text/css");
-  });
-
-  server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    request->send(SPIFFS, "/script.js", "text/javascript");
-  });
-  
-  server.on("/led/on", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    digitalWrite(ledPin, HIGH);
-    request->send(200);
-  });
-
-  server.on("/led/off", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    digitalWrite(ledPin, LOW);
-    request->send(200);
-  });
-
-  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request)
-  {
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    String json = "{";
-    json += "\"led\": \"" + String(digitalRead(ledPin) ? "ALLUMÉE" : "ÉTEINTE") + "\",";
-    if (isnan(temperature) || isnan(humidity)) {
-      json += "\"temperature\": \"Erreur\",";
-      json += "\"humidity\": \"Erreur\"";
-    } else {
-      json += "\"temperature\": " + String(temperature) + ",";
-      json += "\"humidity\": " + String(humidity);
-    }
-    json += "}";
-      request->send(200, "application/json", json);
-  });
-
+  // Définir les routes
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/style.css", HTTP_GET, handleCss);
+  server.on("/script.js", HTTP_GET, handleJs);
+  server.on("/led/on", HTTP_GET, handleLedOn);
+  server.on("/led/off", HTTP_GET, handleLedOff);
+  server.on("/api/status", HTTP_GET, handleApiStatus);
+  server.onNotFound(handleNotFound);
 
   server.begin();
-  Serial.println("Serveur actif!");
+  Serial.println("Serveur web démarré");
 }
 
-void loop()
-{
-
+void loop() {
+  server.handleClient();
+  delay(10);
 }
