@@ -1,135 +1,112 @@
 #include <Arduino.h>
-#include <WiFi.h>                       // Include the WiFi library
-#include <WebServer.h>
 #include <DHT.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
 
-//GPIO
-#define ledPin 2
+
+const char* ssid = "ESP32-AP";
+const char* password = "12345678";
+IPAddress local_IP(192, 168, 4, 1);
+IPAddress gateway(192, 168, 4, 1);
+IPAddress subnet(255, 255, 255, 0);
+const int ledPin = 2;
 #define DHTPIN 4
 #define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE); // Initialize DHT sensor
+DHT dht(DHTPIN, DHTTYPE);
+AsyncWebServer server(80);
 
-const char* ssid = "ESP32-AP ";          // SSID of the access point
-const char* password = "123456789";     // Password of the access point
+void setup()
+{
+  //----------------------------------------------------Serial
+  Serial.begin(115200);
+  Serial.println("\n");
 
-// Static IP configuration
-IPAddress local_ip  (192,168,4,1);
-IPAddress getway    (192,168,4,1);
-IPAddress subnet    (255,255,255,0);
+  //----------------------------------------------------GPIO
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
 
-// Create an instance of the WebServer class
-WebServer server(80);
+  //----------------------------------------------------SPIFFS
+  if(!SPIFFS.begin())
+  {
+    Serial.println("Erreur SPIFFS...");
+    return;
+  }
 
-//Page web 
-const char* style = "<style>"
-                    "body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f4; padding: 20px; }"
-                    "h1 { color: #333; }"
-                    ".button { padding: 12px 24px; margin: 10px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; cursor: pointer; }"
-                    ".button:hover { background-color: #0056b3; }"
-                    "#status { font-size: 18px; color: #444; }"
-                    "</style>";
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
 
-String getHtml() {
-  String html = "<!DOCTYPE html><html><head>"
-                "<meta charset=\"UTF-8\">"
-                "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-                "<title>ESP32 Web Server</title>"
-                + String(style) +
-                "<script>"
-                // Script AJAX pour mises à jour en temps réel
-                "function updateStatus() {"
-                "  var xhr = new XMLHttpRequest();"
-                "  xhr.open('GET', '/sensor', true);"
-                "  xhr.onreadystatechange = function() {"
-                "    if (xhr.readyState == 4 && xhr.status == 200) {"
-                "      var data = JSON.parse(xhr.responseText);"
-                "      document.getElementById('status').innerHTML = "
-                "        'LED : ' + data.led + '<br>' + "
-                "        'Température : ' + data.temperature + ' °C<br>' + "
-                "        'Humidité : ' + data.humidity + ' %';"
-                "    }"
-                "  };"
-                "  xhr.send();"
-                "}"
-                "function sendCommand(cmd) {"
-                "  var xhr = new XMLHttpRequest();"
-                "  xhr.open('GET', '/led/' + cmd, true);"
-                "  xhr.onreadystatechange = function() {"
-                "    if (xhr.readyState == 4 && xhr.status == 200) { updateStatus(); }"
-                "  };"
-                "  xhr.send();"
-                "}"
-                "setInterval(updateStatus, 5000);" // Mise à jour toutes les 5 secondes
-                "window.onload = updateStatus;"
-                "</script>"
-                "</head><body>"
-                "<h1>Contrôle de la LED</h1>"
-                "<p id=\"status\">Chargement...</p>"
-                "<p><a href=\"javascript:sendCommand('on')\" class=\"button\">Allumer</a></p>"
-                "<p><a href=\"javascript:sendCommand('off')\" class=\"button\">Éteindre</a></p>"
-                "</body></html>";
-  return html;
-}
+  while(file)
+  {
+    Serial.print("File: ");
+    Serial.println(file.name());
+    file.close();
+    file = root.openNextFile();
+  }
 
-//Gestionnaire associer aux routes
-void page_principal();
-void allumeled();
-void eteindreled();
-void capteur();
+  //----------------------------------------------------WIFI
+  WiFi.softAPConfig(local_IP, gateway, subnet);
+  Serial.println("Configuration du point d'accès WiFi...");
+  WiFi.softAP(ssid, password);
+	
+	
 
+	
+	Serial.println("\n");
+	Serial.println("Connexion etablie!");
+	Serial.print("Adresse IP: ");
+	Serial.println(WiFi.localIP());
 
-void setup() {
+  //----------------------------------------------------SERVER
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
+    request->send(SPIFFS, "/index.html", "text/html");
+  });
 
-Serial.begin(115200);
-Serial.println("Starting...");
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
+    request->send(SPIFFS, "/style.css", "text/css");
+  });
 
-//Configuration des IO
-pinMode(ledPin,OUTPUT);
+  server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
+    request->send(SPIFFS, "/script.js", "text/javascript");
+  });
+  
+  server.on("/led/on", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
+    digitalWrite(ledPin, HIGH);
+    request->send(200);
+  });
 
-// Set up the access point
-WiFi.softAP(ssid,password);
-WiFi.softAPConfig(local_ip,getway,subnet);
+  server.on("/led/off", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
+    digitalWrite(ledPin, LOW);
+    request->send(200);
+  });
 
-//Racine web page
-server.on("/",HTTP_GET, page_principal);
-server.on("/led/on",HTTP_GET, allumeled);
-server.on("/led/off",HTTP_GET, eteindreled);
-server.on("/sensor",HTTP_GET, capteur);
-
-
-//Set up the server
-server.begin();
-Serial.println("Server started");
-}
-
-void loop() {
-    server.handleClient();  
-}
-
-void page_principal(){
-server.send(200,"text/html",getHtml());
-}
-void allumeled(){
-    digitalWrite(ledPin,1);
-    server.send(200,"text/html",getHtml());
-}
-void eteindreled(){
-    digitalWrite(ledPin,0);
-    server.send(200,"text/html",getHtml());
-}
-
-void capteur() {
+  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
     String json = "{";
     json += "\"led\": \"" + String(digitalRead(ledPin) ? "ALLUMÉE" : "ÉTEINTE") + "\",";
     if (isnan(temperature) || isnan(humidity)) {
-        json += "\"temperature\": \"Erreur\",";
-        json += "\"humidity\": \"Erreur\"";
+      json += "\"temperature\": \"Erreur\",";
+      json += "\"humidity\": \"Erreur\"";
     } else {
-        json += "\"temperature\": " + String(temperature) + ",";
-        json += "\"humidity\": " + String(humidity);
+      json += "\"temperature\": " + String(temperature) + ",";
+      json += "\"humidity\": " + String(humidity);
     }
     json += "}";
-    server.send(200, "application/json", json);
+      request->send(200, "application/json", json);
+  });
+
+
+  server.begin();
+  Serial.println("Serveur actif!");
+}
+
+void loop()
+{
+
 }
