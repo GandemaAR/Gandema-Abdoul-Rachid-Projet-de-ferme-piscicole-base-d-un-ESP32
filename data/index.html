@@ -1,16 +1,233 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ESP32 Web Server</title>
-  <link rel="stylesheet" href="/style.css">
-  <script src="/script.js"></script>
+  <title>Contrôle ESP32</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+    body {
+      background: linear-gradient(135deg, #f0f2f5, #e0e7ff);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      padding: 30px;
+      max-width: 500px;
+      width: 100%;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 1.8em;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .status-item {
+      background: #f9fafb;
+      padding: 15px;
+      border-radius: 10px;
+      text-align: center;
+      transition: transform 0.2s;
+    }
+    .status-item:hover {
+      transform: translateY(-3px);
+    }
+    .status-item span {
+      display: block;
+      font-weight: bold;
+      color: #555;
+    }
+    .status-item .value {
+      font-size: 1.2em;
+      margin-top: 5px;
+    }
+    .on { color: #22c55e; }
+    .off { color: #ef4444; }
+    .auto { color: #3b82f6; }
+    .manual { color: #f59e0b; }
+    .button-group {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background 0.3s, transform 0.1s;
+    }
+    .btn-led {
+      background: #3b82f6;
+      color: white;
+    }
+    .btn-led:hover {
+      background: #2563eb;
+    }
+    .btn-mode {
+      background: #6b7280;
+      color: white;
+    }
+    .btn-mode:hover {
+      background: #4b5563;
+    }
+    .btn:active {
+      transform: scale(0.95);
+    }
+    .connection-status {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 0.9em;
+      color: #555;
+    }
+    .connected { color: #22c55e; }
+    .disconnected { color: #ef4444; }
+    @media (max-width: 400px) {
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+      .btn {
+        padding: 10px 18px;
+        font-size: 0.9em;
+      }
+    }
+  </style>
 </head>
 <body>
-  <h1>Contrôle de la LED</h1>
-  <p id="status">Chargement...</p>
-  <p><a href="javascript:sendCommand('on')" class="button">Allumer</a></p>
-  <p><a href="javascript:sendCommand('off')" class="button">Éteindre</a></p>
+  <div class="container">
+    <h1>Contrôle du Dispositif ESP32</h1>
+    <div class="status-grid">
+      <div class="status-item">
+        <span>Capteur</span>
+        <span class="value" id="etatCapteur">Inconnu</span>
+      </div>
+      <div class="status-item">
+        <span>LED</span>
+        <span class="value" id="etatLED">Inconnu</span>
+      </div>
+      <div class="status-item">
+        <span>Mode</span>
+        <span class="value" id="mode">Inconnu</span>
+      </div>
+      <div class="status-item">
+        <span>Connexion</span>
+        <span class="value" id="connexion">Déconnecté</span>
+      </div>
+    </div>
+    <div class="button-group">
+      <button class="btn btn-led" onclick="toggleLED()">Basculer LED</button>
+      <button class="btn btn-mode" onclick="toggleMode()">Mode <span id="nouveauMode">automatique</span></button>
+    </div>
+    <div class="connection-status">
+      État WebSocket : <span id="wsStatus">Déconnecté</span>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let reconnectionAttempts = 0;
+    const maxReconnectionAttempts = 5;
+
+    function initWebSocket() {
+      ws = new WebSocket('ws://' + window.location.hostname + '/ws');
+      
+      ws.onopen = function() {
+        document.getElementById('wsStatus').textContent = 'Connecté';
+        document.getElementById('wsStatus').classList.add('connected');
+        document.getElementById('wsStatus').classList.remove('disconnected');
+        document.getElementById('connexion').textContent = 'Connecté';
+        document.getElementById('connexion').classList.add('on');
+        document.getElementById('connexion').classList.remove('off');
+        reconnectionAttempts = 0;
+      };
+
+      ws.onmessage = function(event) {
+        let data = JSON.parse(event.data);
+        if (data.type === 'etat') {
+          // Mise à jour capteur
+          document.getElementById('etatCapteur').textContent = data.capteur ? 'Actif' : 'Inactif';
+          document.getElementById('etatCapteur').classList.toggle('on', data.capteur);
+          document.getElementById('etatCapteur').classList.toggle('off', !data.capteur);
+          
+          // Mise à jour LED
+          document.getElementById('etatLED').textContent = data.led ? 'Allumée' : 'Éteinte';
+          document.getElementById('etatLED').classList.toggle('on', data.led);
+          document.getElementById('etatLED').classList.toggle('off', !data.led);
+          
+          // Mise à jour mode
+          document.getElementById('mode').textContent = data.mode.charAt(0).toUpperCase() + data.mode.slice(1);
+          document.getElementById('mode').classList.toggle('auto', data.mode === 'automatique');
+          document.getElementById('mode').classList.toggle('manual', data.mode === 'manuel');
+          document.getElementById('nouveauMode').textContent = data.mode === 'automatique' ? 'manuel' : 'automatique';
+        }
+      };
+
+      ws.onclose = function() {
+        document.getElementById('wsStatus').textContent = 'Déconnecté';
+        document.getElementById('wsStatus').classList.add('disconnected');
+        document.getElementById('wsStatus').classList.remove('connected');
+        document.getElementById('connexion').textContent = 'Déconnecté';
+        document.getElementById('connexion').classList.add('off');
+        document.getElementById('connexion').classList.remove('on');
+        
+        if (reconnectionAttempts < maxReconnectionAttempts) {
+          reconnectionAttempts++;
+          console.log(`Tentative de reconnexion ${reconnectionAttempts}/${maxReconnectionAttempts}...`);
+          setTimeout(initWebSocket, 2000);
+        } else {
+          console.error('Échec des tentatives de reconnexion.');
+        }
+      };
+
+      ws.onerror = function(error) {
+        console.error('Erreur WebSocket :', error);
+      };
+    }
+
+    function toggleLED() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        let message = { 
+          type: 'commande', 
+          led: !document.getElementById('etatLED').textContent.includes('Allumée') 
+        };
+        ws.send(JSON.stringify(message));
+      } else {
+        alert('Erreur : Aucune connexion WebSocket active.');
+      }
+    }
+
+    function toggleMode() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        let message = { 
+          type: 'mode', 
+          mode: document.getElementById('mode').textContent.toLowerCase() === 'automatique' ? 'manuel' : 'automatique' 
+        };
+        ws.send(JSON.stringify(message));
+      } else {
+        alert('Erreur : Aucune connexion WebSocket active.');
+      }
+    }
+
+    // Initialisation WebSocket au chargement de la page
+    initWebSocket();
+  </script>
 </body>
 </html>
